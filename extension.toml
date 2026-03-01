@@ -1,0 +1,10 @@
+id = "unity-debugger"
+name = "Unity Debugger"
+version = "0.1.0"
+schema_version = 1
+authors = ["seless"]
+description = "Debug Unity C# scripts by attaching to a running Unity Editor process."
+repository = "https://github.com/seless/zed-unity-debugger"
+
+[debug_adapters.Unity]
+schema_path = "debug_adapter_schemas/unity.json"

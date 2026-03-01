@@ -1,0 +1,27 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "required": ["request"],
+  "properties": {
+    "request": {
+      "type": "string",
+      "enum": ["attach"],
+      "description": "Must be 'attach'. Unity Debugger does not support launching a new Editor instance."
+    },
+    "projectPath": {
+      "type": "string",
+      "default": "${ZED_WORKTREE_ROOT}",
+      "description": "Path to the Unity project root. Defaults to the Zed worktree root."
+    },
+    "endPoint": {
+      "type": "string",
+      "pattern": "^[^:]+:[0-9]+$",
+      "description": "Optional host:port to connect to. Example: '127.0.0.1:56000'."
+    },
+    "logFile": {
+      "type": "string",
+      "description": "Optional path for the debug adapter log file."
+    }
+  },
+  "additionalProperties": false
+}
