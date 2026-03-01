@@ -34,8 +34,8 @@ impl zed::Extension for UnityDebuggerExtension {
         let unity_config: UnityDebugConfig =
             serde_json::from_str(&config.config).unwrap_or_default();
 
-        // DLL のパスを解決する
-        let dll_path = find_unity_debug_adapter(user_provided_debug_adapter_path)?;
+        // DLL のパスを解決する（worktree経由でシェル環境変数を取得するため渡す）
+        let dll_path = find_unity_debug_adapter(user_provided_debug_adapter_path, worktree)?;
 
         // projectPath が未指定なら worktree のルートを使用
         let project_path = unity_config
@@ -115,31 +115,34 @@ impl zed::Extension for UnityDebuggerExtension {
 ///   1. Zed 設定で明示指定されたパス (user_provided_debug_adapter_path)
 ///   2. visualstudiotoolsforunity.vstuc-* (モダン版 VS Code 拡張)
 ///   3. unity.unity-debug-* (レガシー拡張)
-fn find_unity_debug_adapter(user_provided: Option<String>) -> Result<String, String> {
-    // 1. ユーザー指定パスが最優先
+///
+/// 注意: WASM サンドボックス内では std::env::var と Path::exists() が動作しない。
+///   - 環境変数は worktree.shell_env() 経由で取得する
+///   - ユーザー指定パスの存在確認はスキップ（dotnet が起動失敗すれば明示エラーになる）
+fn find_unity_debug_adapter(user_provided: Option<String>, worktree: &Worktree) -> Result<String, String> {
+    // 1. ユーザー指定パスが最優先。WASM内では exists() が動かないので存在確認なしで信頼する
     if let Some(path) = user_provided {
-        if std::path::Path::new(&path).exists() {
-            return Ok(path);
-        }
-        return Err(format!(
-            "Specified Unity debug adapter not found at: {}\n\
-             Check the dap.Unity.binary setting in Zed preferences.",
-            path
-        ));
+        return Ok(path);
     }
 
-    // ホームディレクトリを取得（Windows: USERPROFILE, Unix: HOME）
-    let home = std::env::var("USERPROFILE")
-        .or_else(|_| std::env::var("HOME"))
-        .map_err(|_| {
-            "Cannot determine home directory (USERPROFILE / HOME not set). \
-             Please set dap.Unity.binary in Zed settings."
+    // USERPROFILE / HOME をシェル環境変数から取得
+    // （std::env::var は WASM サンドボックスで動作しないため worktree 経由で取得）
+    let env = worktree.shell_env();
+    let home = env
+        .iter()
+        .find(|(k, _)| k == "USERPROFILE" || k == "HOME")
+        .map(|(_, v)| v.clone())
+        .ok_or_else(|| {
+            "USERPROFILE / HOME not found in shell environment.\n\
+             Please set the DLL path in Zed settings: dap.Unity.binary"
                 .to_string()
         })?;
 
     let extensions_dir = format!("{}/.vscode/extensions", home);
 
     // 2. モダン版: visualstudiotoolsforunity.vstuc-*
+    //    read_dir が WASM サンドボックスで失敗した場合は次のステップへ
+    //    存在確認 (exists()) は行わず、パスをそのまま返す
     if let Ok(entries) = std::fs::read_dir(&extensions_dir) {
         let mut candidates: Vec<(String, String)> = entries
             .flatten()
@@ -148,11 +151,10 @@ fn find_unity_debug_adapter(user_provided: Option<String>) -> Result<String, Str
                 if name.starts_with("visualstudiotoolsforunity.vstuc-") {
                     let dll =
                         format!("{}/{}/bin/UnityDebugAdapter.dll", extensions_dir, name);
-                    if std::path::Path::new(&dll).exists() {
-                        return Some((name, dll));
-                    }
+                    Some((name, dll))
+                } else {
+                    None
                 }
-                None
             })
             .collect();
         // 降順ソートで最新バージョンを先頭に
@@ -171,11 +173,10 @@ fn find_unity_debug_adapter(user_provided: Option<String>) -> Result<String, Str
                 if name.starts_with("unity.unity-debug-") {
                     let exe =
                         format!("{}/{}/out/UnityDebug.exe", extensions_dir, name);
-                    if std::path::Path::new(&exe).exists() {
-                        return Some((name, exe));
-                    }
+                    Some((name, exe))
+                } else {
+                    None
                 }
-                None
             })
             .collect();
         candidates.sort_by(|a, b| b.0.cmp(&a.0));
@@ -185,10 +186,10 @@ fn find_unity_debug_adapter(user_provided: Option<String>) -> Result<String, Str
     }
 
     Err(format!(
-        "Unity debug adapter not found in {}.\n\
-         Install 'Visual Studio Tools for Unity' VS Code extension, \
-         or set the path manually:\n\
-         Zed settings → dap.Unity.binary = \"path/to/UnityDebugAdapter.dll\"",
+        "Unity debug adapter not found.\n\
+         Install 'Visual Studio Tools for Unity' VS Code extension, then set:\n\
+         Zed settings → dap.Unity.binary = \
+         \"{}/visualstudiotoolsforunity.vstuc-<VERSION>/bin/UnityDebugAdapter.dll\"",
         extensions_dir
     ))
 }
