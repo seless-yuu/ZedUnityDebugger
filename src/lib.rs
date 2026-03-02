@@ -15,6 +15,12 @@ struct UnityDebugConfig {
     log_file: Option<String>,
 }
 
+/// Unity の Library/EditorInstance.json（Unity 実行中に生成される）
+#[derive(Deserialize)]
+struct EditorInstance {
+    process_id: u32,
+}
+
 struct UnityDebuggerExtension;
 
 impl zed::Extension for UnityDebuggerExtension {
@@ -48,9 +54,14 @@ impl zed::Extension for UnityDebuggerExtension {
             "projectPath": project_path,
         });
 
-        if let Some(endpoint) = unity_config.end_point {
-            adapter_config["endPoint"] = Value::String(endpoint);
-        }
+        // endPoint: ユーザー指定 → Library/EditorInstance.json から自動計算 の順で解決
+        // UnityDebugAdapter.dll は endPoint が必須（未指定だと接続待ちでハング）
+        let end_point = if let Some(ep) = unity_config.end_point {
+            ep
+        } else {
+            resolve_unity_endpoint(worktree)?
+        };
+        adapter_config["endPoint"] = Value::String(end_point);
         if let Some(log_file) = unity_config.log_file {
             adapter_config["logFile"] = Value::String(log_file);
         }
@@ -107,6 +118,31 @@ impl zed::Extension for UnityDebuggerExtension {
             tcp_connection: None,
         })
     }
+}
+
+/// Unity Editor のデバッグ接続先 (host:port) を解決する
+///
+/// Unity は実行中に `Library/EditorInstance.json` を生成し、プロセス ID を書き込む。
+/// デバッグポートは `56000 + (processId % 1000)` で計算される（Unity の仕様）。
+fn resolve_unity_endpoint(worktree: &Worktree) -> Result<String, String> {
+    let json_str = worktree
+        .read_text_file("Library/EditorInstance.json")
+        .map_err(|_| {
+            "Unity Editor is not running or the project is not open in Unity.\n\
+             Open the project in Unity Editor, then retry."
+                .to_string()
+        })?;
+
+    let instance: EditorInstance = serde_json::from_str(&json_str).map_err(|e| {
+        format!(
+            "Failed to parse Library/EditorInstance.json: {}.\n\
+             Try reopening the project in Unity Editor.",
+            e
+        )
+    })?;
+
+    let port = 56000 + (instance.process_id % 1000);
+    Ok(format!("127.0.0.1:{}", port))
 }
 
 /// UnityDebugAdapter.dll のパスを解決する
