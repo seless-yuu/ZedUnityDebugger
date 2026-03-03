@@ -118,6 +118,7 @@ impl zed::Extension for UnityDebuggerExtension {
             tcp_connection: None,
         })
     }
+
 }
 
 /// Unity Editor のデバッグ接続先 (host:port) を解決する
@@ -155,7 +156,10 @@ fn resolve_unity_endpoint(worktree: &Worktree) -> Result<String, String> {
 /// 注意: WASM サンドボックス内では std::env::var と Path::exists() が動作しない。
 ///   - 環境変数は worktree.shell_env() 経由で取得する
 ///   - ユーザー指定パスの存在確認はスキップ（dotnet が起動失敗すれば明示エラーになる）
-fn find_unity_debug_adapter(user_provided: Option<String>, worktree: &Worktree) -> Result<String, String> {
+fn find_unity_debug_adapter(
+    user_provided: Option<String>,
+    worktree: &Worktree,
+) -> Result<String, String> {
     // 1. ユーザー指定パスが最優先。WASM内では exists() が動かないので存在確認なしで信頼する
     if let Some(path) = user_provided {
         return Ok(path);
@@ -200,6 +204,27 @@ fn find_unity_debug_adapter(user_provided: Option<String>, worktree: &Worktree) 
         }
     }
 
+    // PowerShell fallback (vstuc): read_dir が WASM サンドボックスで動かない場合
+    {
+        let ps = format!(
+            "Get-ChildItem -Path '{}' -Filter 'UnityDebugAdapter.dll' -Recurse \
+             -ErrorAction SilentlyContinue \
+             | Where-Object {{ $_.FullName -like '*vstuc*' }} \
+             | Sort-Object -Descending FullName \
+             | Select-Object -First 1 -ExpandProperty FullName",
+            extensions_dir
+        );
+        if let Ok(out) = std::process::Command::new("powershell")
+            .args(["-NoProfile", "-Command", &ps])
+            .output()
+        {
+            let path = String::from_utf8_lossy(&out.stdout).trim().to_string();
+            if !path.is_empty() {
+                return Ok(path);
+            }
+        }
+    }
+
     // 3. レガシー版: unity.unity-debug-*
     if let Ok(entries) = std::fs::read_dir(&extensions_dir) {
         let mut candidates: Vec<(String, String)> = entries
@@ -221,6 +246,27 @@ fn find_unity_debug_adapter(user_provided: Option<String>, worktree: &Worktree) 
         }
     }
 
+    // PowerShell fallback (unity-debug レガシー)
+    {
+        let ps = format!(
+            "Get-ChildItem -Path '{}' -Filter 'UnityDebug.exe' -Recurse \
+             -ErrorAction SilentlyContinue \
+             | Where-Object {{ $_.FullName -like '*unity-debug*' }} \
+             | Sort-Object -Descending FullName \
+             | Select-Object -First 1 -ExpandProperty FullName",
+            extensions_dir
+        );
+        if let Ok(out) = std::process::Command::new("powershell")
+            .args(["-NoProfile", "-Command", &ps])
+            .output()
+        {
+            let path = String::from_utf8_lossy(&out.stdout).trim().to_string();
+            if !path.is_empty() {
+                return Ok(path);
+            }
+        }
+    }
+
     Err(format!(
         "Unity debug adapter not found.\n\
          Install 'Visual Studio Tools for Unity' VS Code extension, then set:\n\
@@ -229,5 +275,6 @@ fn find_unity_debug_adapter(user_provided: Option<String>, worktree: &Worktree) 
         extensions_dir
     ))
 }
+
 
 zed::register_extension!(UnityDebuggerExtension);

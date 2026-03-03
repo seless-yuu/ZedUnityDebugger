@@ -8,3 +8,4 @@ repository = "https://github.com/seless/zed-unity-debugger"
 
 [debug_adapters.Unity]
 schema_path = "debug_adapter_schemas/unity.json"
+
