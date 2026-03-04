@@ -84,7 +84,7 @@ Zed ──DAP──▶ dotnet UnityDebugAdapter.dll ──TCP──▶ Unity Edi
 ## コントリビューション
 
 ```bash
-git clone https://github.com/seless-yuu/ZedUnityDebugger
+git clone https://github.com/waless-seel/ZedUnityDebugger
 cd ZedUnityDebugger
 
 # ビルド

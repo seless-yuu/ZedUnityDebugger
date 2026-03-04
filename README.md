@@ -83,7 +83,7 @@ This extension:
 ## Contributing
 
 ```bash
-git clone https://github.com/seless-yuu/ZedUnityDebugger
+git clone https://github.com/waless-seel/ZedUnityDebugger
 cd zed-unity-debugger
 
 # Build
